@@ -810,11 +810,13 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 .field {
+  font-size: 12px;
+  margin: 20px 0;
+}
+.field label {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
   gap: 7px;
-  margin: 20px 0;
 }
 .field input {
   background: var(--input);
@@ -823,6 +825,22 @@ dialog::backdrop {
   border-radius: 3px;
   color: var(--text);
   width: 100%;
+}
+.password-field {
+  position: relative;
+}
+.password-field input {
+  padding-right: 42px;
+}
+.password-field input::-ms-reveal {
+  display: none;
+}
+.password-field .icon-button {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 32px;
+  height: 28px;
 }
 .dialog-actions {
   display: flex;

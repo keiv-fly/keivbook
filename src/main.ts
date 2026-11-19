@@ -213,7 +213,18 @@ type Field = {
   type?: string;
   placeholder?: string;
   required?: boolean;
+  revealName?: string;
 };
+function setPasswordVisible(
+  input: HTMLInputElement,
+  toggle: HTMLButtonElement,
+  visible: boolean,
+) {
+  input.type = visible ? "text" : "password";
+  toggle.setAttribute("aria-pressed", String(visible));
+  toggle.innerHTML = icon(visible ? "eye-off" : "eye");
+  refreshIcons();
+}
 async function dialog(
   title: string,
   description: string,
@@ -231,7 +242,8 @@ async function dialog(
       el("p", "muted", description),
     );
     for (const f of fields) {
-      const l = el("label", "field", f.label),
+      const field = el("div", "field"),
+        label = el("label", "", f.label),
         input = el("input");
       input.name = f.key;
       input.type = f.type || "text";
@@ -240,8 +252,22 @@ async function dialog(
       input.required = f.required || false;
       input.autocomplete = "off";
       input.spellcheck = false;
-      l.append(input);
-      form.append(l);
+      label.append(input);
+      field.append(label);
+      if (f.revealName) {
+        field.classList.add("password-field");
+        const toggle = button(
+          `Show ${f.revealName}`,
+          () => setPasswordVisible(input, toggle, input.type === "password"),
+          "icon-button",
+          "eye",
+        );
+        toggle.type = "button";
+        toggle.title = `Show or hide ${f.revealName}`;
+        toggle.setAttribute("aria-pressed", "false");
+        field.append(toggle);
+      }
+      form.append(field);
     }
     const actions = el("div", "dialog-actions"),
       cancel = el("button", "secondary", "Cancel"),
@@ -252,6 +278,7 @@ async function dialog(
     form.append(actions);
     d.append(form);
     document.body.append(d);
+    if (fields.some((field) => field.revealName)) refreshIcons();
     function finish(value: Record<string, string> | null) {
       form.reset();
       for (const i of form.querySelectorAll("input")) i.value = "";
@@ -1270,6 +1297,7 @@ async function unlockVault() {
         label: "Master password",
         type: "password",
         required: true,
+        revealName: "master password",
       },
     ];
     if (!exists)
@@ -1278,6 +1306,7 @@ async function unlockVault() {
         label: "Confirm master password",
         type: "password",
         required: true,
+        revealName: "confirmation password",
       });
     const r = await dialog(
       exists ? "Unlock your vault" : "Create your vault",
@@ -1323,9 +1352,15 @@ function lockVault() {
     for (const key of Object.keys(session.values)) session.values[key] = "";
   }
   session = null;
-  document
-    .querySelectorAll("input[type=password]")
-    .forEach((input) => ((input as HTMLInputElement).value = ""));
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    'input[type="password"], .password-field input',
+  )) {
+    input.value = "";
+    if (input.type === "text") {
+      const toggle = input.closest(".password-field")!.querySelector("button")!;
+      setPasswordVisible(input, toggle, false);
+    }
+  }
   if (panel === "vault") renderPanel();
   renderEditor();
   status();

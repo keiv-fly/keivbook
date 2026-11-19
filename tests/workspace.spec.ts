@@ -310,10 +310,28 @@ test("vault create, variable, lock, unlock, and no plaintext persisted", async (
   await page
     .getByRole("button", { name: "Create encrypted vault", exact: true })
     .click();
-  await page
-    .getByLabel("Master password", { exact: true })
-    .fill("test-only-password");
-  await page.getByLabel("Confirm master password").fill("test-only-password");
+  const password = page.getByLabel("Master password", { exact: true });
+  const confirmation = page.getByLabel("Confirm master password");
+  const showPassword = page.getByRole("button", {
+    name: "Show master password",
+  });
+  const showConfirmation = page.getByRole("button", {
+    name: "Show confirmation password",
+  });
+  await password.fill("test-only-password");
+  await confirmation.fill("test-only-password");
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(confirmation).toHaveAttribute("type", "password");
+  await showPassword.click();
+  await expect(password).toHaveAttribute("type", "text");
+  await expect(password).toHaveValue("test-only-password");
+  await expect(confirmation).toHaveAttribute("type", "password");
+  await showConfirmation.press("Space");
+  await expect(confirmation).toHaveAttribute("type", "text");
+  await expect(confirmation).toHaveValue("test-only-password");
+  await showPassword.click();
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(confirmation).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Create vault", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Vault is unlocked" }),
@@ -350,9 +368,28 @@ test("vault create, variable, lock, unlock, and no plaintext persisted", async (
     "synthetic-test-secret",
   );
   await page.getByRole("button", { name: "Unlock vault", exact: true }).click();
-  await page
-    .getByLabel("Master password", { exact: true })
-    .fill("test-only-password");
+  await expect(password).toHaveAttribute("type", "password");
+  await password.fill("test-only-password");
+  await showPassword.click();
+  await expect(password).toHaveAttribute("type", "text");
+  await expect(showPassword).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Reflect.deleteProperty(document, "hidden");
+  });
+  await expect(password).toHaveValue("");
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(showPassword).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.getByRole("button", { name: "Unlock vault", exact: true }).click();
+  await password.fill("test-only-password");
+  await showPassword.click();
+  await expect(password).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Vault is unlocked" }),
