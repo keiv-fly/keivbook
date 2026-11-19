@@ -7,12 +7,16 @@ use std::{
     sync::Mutex,
 };
 
+mod git;
+pub use git::GitStatus;
+
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_NOTE: usize = 8 * 1024 * 1024;
 pub const MAX_ASSET: usize = 20 * 1024 * 1024;
 pub struct Store {
     pub root: PathBuf,
     pub gate: Mutex<()>,
+    git_gate: Mutex<()>,
 }
 #[derive(Serialize, Clone)]
 pub struct Entry {
@@ -77,6 +81,7 @@ impl Store {
         let store = Self {
             root: root.canonicalize().map_err(err)?,
             gate: Mutex::new(()),
+            git_gate: Mutex::new(()),
         };
         store.ensure_private_ignore()?;
         if !store.root.join("index.md").exists() {
@@ -361,13 +366,7 @@ impl Store {
     }
     pub fn setup_status(&self) -> Result<Setup> {
         let configured = self.resolve(".keivbook/setup.json", true)?.exists();
-        // Check only this directory, never discover the application's parent repository.
-        let repo = git2::Repository::open_ext(
-            &self.root,
-            git2::RepositoryOpenFlags::NO_SEARCH,
-            std::iter::empty::<&Path>(),
-        )
-        .ok();
+        let repo = self.data_repository().ok().flatten();
         let remote = repo.as_ref().and_then(|r| {
             r.find_remote("origin")
                 .ok()
@@ -381,6 +380,7 @@ impl Store {
         })
     }
     pub fn configure(&self, initialize: bool, remote: Option<String>) -> Result<Setup> {
+        let _git_guard = self.git_gate.lock().map_err(err)?;
         let _guard = self.gate.lock().map_err(err)?;
         let url = remote.unwrap_or_default().trim().to_owned();
         if !url.is_empty()

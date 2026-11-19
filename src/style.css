@@ -6,7 +6,6 @@
   --editor: #1f1f1f;
   --sidebar: #181818;
   --activity: #181818;
-  --title: #181818;
   --border: #2b2b2b;
   --text: #cccccc;
   --muted: #858585;
@@ -26,7 +25,6 @@
   --editor: #fff;
   --sidebar: #f8f8f8;
   --activity: #f8f8f8;
-  --title: #f8f8f8;
   --border: #e5e5e5;
   --text: #3b3b3b;
   --muted: #767676;
@@ -83,60 +81,8 @@ svg {
   display: flex;
   flex-direction: column;
 }
-.titlebar {
-  height: 44px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 13px;
-  background: var(--title);
-  border-bottom: 1px solid var(--border);
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-}
-.brand > svg {
-  color: #53a4e0;
-  width: 21px;
-  height: 21px;
-}
-.brand strong {
-  font-weight: 600;
-  color: var(--strong);
-}
-.brand-divider {
-  height: 15px;
-  border-left: 1px solid var(--border);
-  margin: 0 3px;
-}
 .muted {
   color: var(--muted);
-}
-.command-search {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  width: 35%;
-  max-width: 460px;
-  height: 28px;
-  background: var(--input);
-  font-size: 12px;
-  color: var(--muted);
-}
-.command-search kbd {
-  font-size: 10px;
-  margin-left: auto;
-  margin-right: 5px;
-  color: var(--muted);
-}
-.command-search svg {
-  margin-left: 7px;
 }
 kbd {
   font-family: inherit;
@@ -318,12 +264,19 @@ main {
 .tree-row[aria-expanded] .file-icon {
   color: #c4aa79;
 }
+.tab-bar {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+}
 #tabs {
   display: flex;
+  flex: 1;
+  min-width: 0;
   min-height: 35px;
-  background: var(--sidebar);
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
   scrollbar-width: thin;
 }
 .tab {
@@ -332,6 +285,7 @@ main {
   display: flex;
   align-items: center;
   color: var(--muted);
+  flex-shrink: 0;
   min-width: 140px;
   border-top: 1px solid transparent;
 }
@@ -362,53 +316,43 @@ main {
   border-radius: 4px;
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
 }
-.tab-close svg {
-  width: 13px;
-  height: 13px;
+.tab-close svg,
+.dirty-dot {
+  width: 14px;
+  height: 14px;
 }
 .dirty-dot {
-  font-size: 16px;
-  padding-right: 3px;
-  color: var(--text);
+  display: none;
+  border-radius: 50%;
+  background: var(--text);
 }
-.editor-top {
-  height: 43px;
-  min-height: 43px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--border);
-  gap: 14px;
+.tab.dirty .tab-close:not(:hover, :focus-visible) .dirty-dot {
+  display: block;
 }
-#breadcrumb {
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tab.dirty .tab-close:not(:hover, :focus-visible) svg {
+  display: none;
 }
 #modes {
   display: flex;
   gap: 2px;
-  padding: 3px;
-  background: var(--sidebar);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-}
-#modes button {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 3px;
-}
-#modes svg {
-  width: 12px;
-  height: 12px;
+  padding: 0 4px;
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
 }
 #modes button.active {
   background: var(--hover);
   color: var(--strong);
+}
+#theme {
+  margin: 0 6px 0 2px;
+  flex-shrink: 0;
+}
+#modes button:disabled,
+.git-controls button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 #formatbar {
   display: flex;
@@ -681,6 +625,62 @@ main {
   border: 1px solid var(--border);
   color: var(--text);
 }
+.git-form {
+  margin: 10px 16px 0;
+}
+.git-form input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--input);
+  color: var(--text);
+}
+.git-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.git-controls button {
+  flex: 1;
+  min-height: 30px;
+  border-radius: 3px;
+}
+.git-icon {
+  display: flex;
+}
+.git-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.git-changes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.git-change {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 27px;
+  padding: 2px 16px;
+  font-size: 12px;
+}
+.git-change:hover {
+  background: var(--hover);
+}
+.git-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-flags {
+  color: var(--muted);
+  font-family: Consolas, monospace;
+}
+#git-changes .panel-help {
+  overflow-wrap: anywhere;
+}
 .search-result {
   display: block;
   width: 100%;
@@ -946,19 +946,11 @@ dialog::backdrop {
   background: var(--hover);
 }
 @media (max-width: 1000px) {
-  .brand .muted,
-  .brand-divider,
   .format-hint {
     display: none;
   }
-  .command-search {
-    width: 35%;
-  }
   .document-editor {
     padding: 32px 36px 90px;
-  }
-  .editor-top {
-    padding: 0 14px;
   }
   .statusbar > div {
     gap: 12px;

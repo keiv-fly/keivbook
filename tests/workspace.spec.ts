@@ -48,9 +48,11 @@ test.beforeEach(async ({ page }) => {
       remote,
       location: "C:\\KeivBook\\data",
     };
+    const gitCalls: string[] = [];
     Object.assign(window, {
       __testFiles: files,
       __testGetVault: () => vault,
+      __testGitCalls: gitCalls,
       __TAURI_INTERNALS__: {
         metadata: {
           currentWindow: { label: "main" },
@@ -70,6 +72,26 @@ test.beforeEach(async ({ page }) => {
             state.repository = args.initialize;
             state.remote = args.remote;
             return { ...state };
+          }
+          if (cmd === "git_status") {
+            const committed = gitCalls.some((call) =>
+              call.startsWith("commit:"),
+            );
+            return {
+              branch: "main",
+              can_push: committed && Boolean(state.remote),
+              changes: committed
+                ? []
+                : [{ path: "index.md", index: "?", worktree: "?" }],
+            };
+          }
+          if (cmd === "git_commit") {
+            gitCalls.push(`commit:${args.message}`);
+            return;
+          }
+          if (cmd === "git_push") {
+            gitCalls.push("push");
+            return;
           }
           if (cmd === "read_file") {
             if (!files[args.path]) throw Error("File not found");
@@ -114,6 +136,83 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+test("the first note saves from the focused editor, and the dirty dot replaces its close icon", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Create repository", exact: true })
+    .click();
+  const editor = page.locator(".tiptap");
+  await expect(editor).toBeFocused();
+  const tab = page.getByRole("tab", { selected: true });
+  const close = tab.getByRole("button", { name: "Close index.md" });
+  const cross = close.locator("svg");
+  const crossBox = await cross.boundingBox();
+  expect(crossBox).toBeTruthy();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("First note save");
+  const dot = close.locator(".dirty-dot");
+  await expect(dot).toBeVisible();
+  await expect(cross).toBeHidden();
+  expect(await dot.boundingBox()).toEqual(crossBox);
+  await close.hover();
+  await expect(cross).toBeVisible();
+  await expect(dot).toBeHidden();
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+  await expect(cross).toBeVisible();
+  await expect(dot).toBeHidden();
+
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  const source = page.locator(".cm-content");
+  await source.press("Control+End");
+  await source.press("Enter");
+  await page.keyboard.type("Save with a different keyboard layout");
+  await source.dispatchEvent("keydown", {
+    key: "ы",
+    code: "KeyS",
+    ctrlKey: true,
+    bubbles: true,
+  });
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+  const content = await page.evaluate(
+    () => (window as any).__testFiles["index.md"].content,
+  );
+  expect(content).toContain("First note save");
+  expect(content).toContain("Save with a different keyboard layout");
+});
+
+test("Source Control commits with a1 by default and pushes to origin", async ({
+  page,
+}) => {
+  await page
+    .getByLabel("Remote repository (optional)")
+    .fill("https://example.com/private.git");
+  await page
+    .getByRole("button", { name: "Create repository", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Source Control", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Commit message" }),
+  ).toHaveValue("a1");
+  await expect(page.locator(".git-changes")).toContainText("index.md");
+  const commit = page.getByRole("button", { name: "Commit", exact: true });
+  const push = page.getByRole("button", { name: "Push", exact: true });
+  await expect(push).toBeDisabled();
+  await commit.click();
+  await expect(page.getByText("No saved changes.")).toBeVisible();
+  await expect(commit).toBeDisabled();
+  await push.click();
+  await expect(page.getByText("Pushed to origin.")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__testGitCalls)).toEqual([
+    "commit:a1",
+    "push",
+  ]);
+});
+
 test("first launch, independent Git setup, and both themes", async ({
   page,
 }) => {
@@ -128,6 +227,15 @@ test("first launch, independent Git setup, and both themes", async ({
     .click();
   await expect(page.locator("#git-status")).toContainText("Git");
   await expect(page.locator(".tiptap h1")).toHaveText("Welcome to KeivBook");
+  const toolbar = page.locator(".tab-bar");
+  for (const label of ["Edit", "View", "Code"]) {
+    const mode = toolbar.getByRole("button", { name: label, exact: true });
+    await expect(mode).toHaveAttribute("title", label);
+    await expect(mode).toHaveText("");
+  }
+  await expect(
+    toolbar.getByRole("button", { name: "Toggle color theme" }),
+  ).toBeVisible();
   await page.evaluate(() => localStorage.setItem("keivbook.theme", "dark"));
   if ((await page.locator("html").getAttribute("data-theme")) !== "dark")
     await page.getByRole("button", { name: "Toggle color theme" }).click();
@@ -143,7 +251,10 @@ test("edits survive mode switches and save, folder click opens its homepage", as
     .getByRole("button", { name: "Create repository", exact: true })
     .click();
   await page.getByRole("button", { name: "notes", exact: true }).click();
-  await expect(page.locator("#breadcrumb")).toContainText("notes  /  index.md");
+  await expect(page.locator(".tab.active .tab-label")).toHaveAttribute(
+    "title",
+    "notes/index.md",
+  );
   await page.getByRole("button", { name: "ideas.md", exact: true }).click();
   await expect(page.locator(".tiptap")).toContainText(
     "{{vault.personal_user.password}}",
@@ -175,11 +286,17 @@ test("search and new note workflow", async ({ page }) => {
     .getByRole("textbox", { name: "Search notes" })
     .fill("worth remembering");
   await page.locator(".search-result").click();
-  await expect(page.locator("#breadcrumb")).toContainText("notes  /  index.md");
+  await expect(page.locator(".tab.active .tab-label")).toHaveAttribute(
+    "title",
+    "notes/index.md",
+  );
   await page.keyboard.press("Control+n");
   await page.getByLabel("Note path").fill("notes/new.md");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.locator("#breadcrumb")).toContainText("notes  /  new.md");
+  await expect(page.locator(".tab.active .tab-label")).toHaveAttribute(
+    "title",
+    "notes/new.md",
+  );
 });
 test("vault create, variable, lock, unlock, and no plaintext persisted", async ({
   page,
@@ -279,7 +396,10 @@ test("a stale save preserves both disk changes and the unsaved note", async ({
   await page.getByRole("button", { name: "Save a copy", exact: true }).click();
   await page.getByLabel("Path", { exact: true }).fill("recovered.md");
   await page.getByRole("button", { name: "Save copy", exact: true }).click();
-  await expect(page.locator("#breadcrumb")).toContainText("recovered.md");
+  await expect(page.locator(".tab.active .tab-label")).toHaveAttribute(
+    "title",
+    "recovered.md",
+  );
   expect(
     await page.evaluate(
       () => (window as any).__testFiles["recovered.md"].content,

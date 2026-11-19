@@ -12,6 +12,11 @@ export type Setup = {
   remote: string | null;
   location: string;
 };
+export type GitStatus = {
+  branch: string | null;
+  can_push: boolean;
+  changes: { path: string; index: string; worktree: string }[];
+};
 export const api = {
   tree: () => invoke<Entry[]>("list_tree"),
   read: (path: string) => invoke<Document>("read_file", { path }),
@@ -31,4 +36,7 @@ export const api = {
   setup: () => invoke<Setup>("setup_status"),
   configure: (initialize: boolean, remote: string | null) =>
     invoke<Setup>("configure_git", { initialize, remote }),
+  gitStatus: () => invoke<GitStatus>("git_status"),
+  gitCommit: (message: string) => invoke<void>("git_commit", { message }),
+  gitPush: () => invoke<void>("git_push"),
 };

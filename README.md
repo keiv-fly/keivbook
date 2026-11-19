@@ -9,9 +9,9 @@ Double-click **`keivbook.exe` in the project root**. It creates `data/index.md` 
 - Create an independent repository in `data/` and optionally set its `origin` remote.
 - Cancel and choose **Continue locally**, then configure Git later from Settings.
 
-Git initialization is built into the executable; installing Git is not necessary for this step. KeivBook does not clone, commit, fetch, or push. Use your preferred Git client for those operations. Choose a private remote: note text and vault key names are intentionally unencrypted.
+Git initialization is built into the executable. Install Git for Windows and make sure `git` is on PATH to use the Source Control panel. Commits use your Git name and email, and pushes use your existing Git credentials or SSH configuration. Choose a private remote because note text and vault key names are unencrypted.
 
-Move `keivbook.exe` and `data/` together to move the notebook. Keep them in a writable local directory. All application frontend assets are embedded in the executable; no application server or internet connection is used at runtime. Node and Rust are needed only to build from source.
+Move `keivbook.exe` and `data/` together to move the notebook. Keep them in a writable local directory. All frontend assets are embedded in the executable. Editing works offline. Push connects to the configured Git remote. Node and Rust are needed only to build from source.
 
 Windows 11's WebView2 runtime is required. For a machine without it, distribute Microsoft's extracted **x64 Fixed Version WebView2 runtime** in `webview2/` next to `keivbook.exe`, with `webview2/msedgewebview2.exe` directly inside that directory. KeivBook detects it automatically. The runtime binaries are not included in this repository. See [Microsoft's runtime distribution guide](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution) and [Tauri's WebView2 packaging documentation](https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options).
 
@@ -43,6 +43,7 @@ npm run test:ui       # Headless Edge workflow tests with synthetic data
 - **Edit** provides headings, lists, links, tables, and images with TipTap. **View** provides safe rendering, internal links, heading folds, and vault controls. **Code** provides CodeMirror Markdown editing.
 - Drop PNG, JPEG, GIF, WebP, or BMP images into Edit or Code mode. Images are copied into `data/images/` and inserted with relative paths. SVG and remotely hosted images are intentionally not loaded.
 - Search scans note names and contents. Tabs keep unsaved changes while switching notes and modes. Save explicitly with **Ctrl+S**.
+- Open **Source Control** to see changes in `data/`. **Commit** starts with the message `a1` and records staged changes if there are any, or all saved changes otherwise. **Push** sends committed changes from the current branch to the same branch on `origin`.
 - External changes reload clean notes. If a note has unsaved edits, the conflict banner offers **Reload disk version** or **Save a copy**. A stale save cannot silently overwrite another revision.
 - Toggle the sun/moon button for Light+ or Dark+. Drag the Explorer divider to resize it.
 
@@ -53,6 +54,7 @@ npm run test:ui       # Headless Edge workflow tests with synthetic data
 | Ctrl+W | Close the active tab |
 | Ctrl+Shift+E | Explorer |
 | Ctrl+Shift+F | Search |
+| Ctrl+Shift+G | Source Control |
 | Ctrl+Shift+L | Lock vault |
 | Ctrl+1 / Ctrl+2 / Ctrl+3 | Edit / View / Code |
 
@@ -104,7 +106,8 @@ The application assumes the local user and the OS are trusted. Path checks do no
 - `src/extensions.ts`: lossless vault-reference nodes and local image node views.
 - `src/vault.ts`: encryption, envelope validation, and reference auditing.
 - `src/markdown.ts`: sanitized rendering and relative navigation.
-- `src-tauri/src/lib.rs`: scoped storage, revisions, recovery, and Git setup.
+- `src-tauri/src/lib.rs`: scoped storage, revisions, and recovery.
+- `src-tauri/src/git.rs`: scoped Git status, commit, and push.
 - `src-tauri/src/main.rs`: Tauri commands and filesystem watcher.
 - `tests/`: browser workflow tests; `src/*.test.ts` and Rust `#[test]` modules contain unit tests.
 

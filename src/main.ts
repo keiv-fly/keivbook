@@ -30,6 +30,7 @@ import {
   Save,
   X,
   GitBranch,
+  ArrowUp,
   BookOpen,
   Code,
   PenLine,
@@ -53,7 +54,7 @@ import {
 } from "lucide";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, type Entry, type Setup } from "./api";
+import { api, type Entry, type GitStatus, type Setup } from "./api";
 import {
   renderMarkdown,
   resolveLink,
@@ -105,6 +106,12 @@ let panel = "explorer",
 let theme =
   localStorage.getItem("keivbook.theme") ||
   (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+const defaultCommitMessage = "a1";
+let gitMessage = defaultCommitMessage,
+  gitStatus: GitStatus | undefined,
+  gitError = "",
+  gitBusy = false,
+  gitRequest = 0;
 const $ = <T extends HTMLElement = HTMLElement>(s: string) =>
   document.querySelector<T>(s)!;
 const icons = {
@@ -125,6 +132,7 @@ const icons = {
   Save,
   X,
   GitBranch,
+  ArrowUp,
   BookOpen,
   Code,
   PenLine,
@@ -193,11 +201,10 @@ function busy<T>(action: () => Promise<T>) {
 }
 
 $("#app").innerHTML = `
- <header class="titlebar"><div class="brand">${icon("book-open")}<strong>KeivBook</strong><span class="brand-divider"></span><span class="muted">Personal workspace</span></div><button class="command-search" id="quick-search">${icon("search")}<span>Search your notes</span><kbd>Ctrl Shift F</kbd></button><button id="theme" class="icon-button" title="Toggle color theme" aria-label="Toggle color theme"></button></header>
- <div class="workbench"><nav class="activity" aria-label="Panels"><div class="activity-top"><button data-panel="explorer" title="Explorer (Ctrl+Shift+E)" aria-label="Explorer">${icon("files")}</button><button data-panel="search" title="Search (Ctrl+Shift+F)" aria-label="Search">${icon("search")}</button><button data-panel="vault" title="Encrypted vault" aria-label="Encrypted vault">${icon("lock-keyhole")}</button></div><button data-panel="settings" title="Settings" aria-label="Settings">${icon("settings")}</button></nav>
+ <div class="workbench"><nav class="activity" aria-label="Panels"><div class="activity-top"><button data-panel="explorer" title="Explorer (Ctrl+Shift+E)" aria-label="Explorer">${icon("files")}</button><button data-panel="search" title="Search (Ctrl+Shift+F)" aria-label="Search">${icon("search")}</button><button data-panel="git" title="Source Control (Ctrl+Shift+G)" aria-label="Source Control">${icon("git-branch")}</button><button data-panel="vault" title="Encrypted vault" aria-label="Encrypted vault">${icon("lock-keyhole")}</button></div><button data-panel="settings" title="Settings" aria-label="Settings">${icon("settings")}</button></nav>
  <aside class="sidebar"><div class="sidebar-title"><span id="panel-title">EXPLORER</span><div id="panel-actions"></div></div><div id="sidebar-content"></div><div class="sidebar-footer">${icon("shield-check")}<span>Local files. Yours to keep.</span></div></aside><div id="resize" role="separator" aria-label="Resize sidebar" tabindex="0"></div>
- <main><div id="tabs" role="tablist"></div><div class="editor-top"><div id="breadcrumb"></div><div id="modes"><button data-mode="edit">${icon("pen-line")}Edit</button><button data-mode="view">${icon("book-open")}View</button><button data-mode="code">${icon("code")}Code</button></div></div><div id="formatbar"></div><div id="conflict"></div><div id="editor-shell"><div id="editor"></div></div></main></div>
- <footer class="statusbar"><div><span id="git-status">${icon("git-branch")}local</span><span id="save-status"></span></div><div><span id="word-count"></span><span>UTF-8</span><span>Markdown</span><button id="vault-status">${icon("lock-keyhole")}Vault locked</button></div></footer><div id="toasts" aria-live="polite"></div>`;
+ <main><div class="tab-bar"><div id="tabs" role="tablist" aria-label="Open notes"></div><div id="modes" role="group" aria-label="Editor mode"><button class="icon-button" data-mode="edit" title="Edit" aria-label="Edit">${icon("pen-line")}</button><button class="icon-button" data-mode="view" title="View" aria-label="View">${icon("book-open")}</button><button class="icon-button" data-mode="code" title="Code" aria-label="Code">${icon("code")}</button></div><button id="theme" class="icon-button" title="Toggle color theme" aria-label="Toggle color theme"></button></div><div id="formatbar"></div><div id="conflict"></div><div id="editor-shell" tabindex="-1"><div id="editor"></div></div></main></div>
+ <footer class="statusbar"><div><button id="git-status" title="Open Source Control">${icon("git-branch")}local</button><span id="save-status"></span></div><div><span id="word-count"></span><span>UTF-8</span><span>Markdown</span><button id="vault-status">${icon("lock-keyhole")}Vault locked</button></div></footer><div id="toasts" aria-live="polite"></div>`;
 
 type Field = {
   key: string;
@@ -286,7 +293,8 @@ async function refreshTree() {
   if (panel === "explorer") renderPanel();
 }
 function renderPanel() {
-  $("#panel-title").textContent = panel.toUpperCase();
+  $("#panel-title").textContent =
+    panel === "git" ? "SOURCE CONTROL" : panel.toUpperCase();
   document
     .querySelectorAll("[data-panel]")
     .forEach((e) =>
@@ -405,20 +413,9 @@ function renderPanel() {
       searchTimer = setTimeout(() => void searchNotes(input.value), 180);
     };
     queueMicrotask(() => input.focus());
-  } else if (panel === "vault") renderVault(host);
+  } else if (panel === "git") renderGitPanel(host, actions);
+  else if (panel === "vault") renderVault(host);
   else {
-    host.append(
-      el("h3", "panel-heading", "Your workspace"),
-      el("p", "panel-help", "Choose the space you think best in."),
-    );
-    host.append(
-      button(
-        theme === "dark" ? "Switch to Light+" : "Switch to Dark+",
-        toggleTheme,
-        "wide secondary",
-        theme === "dark" ? "sun" : "moon",
-      ),
-    );
     host.append(
       el("h3", "panel-heading", "Version control"),
       el(
@@ -443,7 +440,7 @@ function renderPanel() {
       el(
         "p",
         "panel-help shortcuts",
-        "Ctrl+S    Save note\nCtrl+N    New note\nCtrl+W    Close tab\nCtrl+Shift+F    Search\nCtrl+Shift+E    Explorer\nCtrl+Shift+L    Lock vault\nCtrl+1 / 2 / 3    Edit / View / Code",
+        "Ctrl+S    Save note\nCtrl+N    New note\nCtrl+W    Close tab\nCtrl+Shift+F    Search\nCtrl+Shift+E    Explorer\nCtrl+Shift+G    Source Control\nCtrl+Shift+L    Lock vault\nCtrl+1 / 2 / 3    Edit / View / Code",
       ),
     );
     host.append(
@@ -459,6 +456,7 @@ function renderPanel() {
 function setPanel(value: string) {
   panel = value;
   renderPanel();
+  if (panel === "git") void refreshGit();
 }
 function contextMenu(event: MouseEvent, entry: Entry) {
   document.querySelector(".context-menu")?.remove();
@@ -627,28 +625,45 @@ async function open(path: string) {
     parts.pop();
   }
   renderEditor();
+  focusEditor();
   if (panel === "explorer") renderPanel();
+}
+function focusEditor() {
+  if (rich) rich.view.focus();
+  else if (code) code.focus();
+  else if (active) $("#editor-shell").focus();
 }
 function changed(content: string) {
   if (!active) return;
   active.content = content;
-  active.dirty = true;
-  renderTabs();
+  if (!active.dirty) {
+    active.dirty = true;
+    renderTabs();
+  }
   status();
 }
 function renderTabs() {
   const host = $("#tabs");
   host.replaceChildren();
   for (const t of tabs) {
-    const row = el("div", `tab ${active === t ? "active" : ""}`);
+    const row = el(
+      "div",
+      `tab${active === t ? " active" : ""}${t.dirty ? " dirty" : ""}`,
+    );
     row.setAttribute("role", "tab");
     row.setAttribute("aria-selected", String(active === t));
     const b = button(t.path.split("/").pop()!, () => open(t.path), "tab-label");
     b.title = t.path;
     b.prepend(Object.assign(el("span", ""), { innerHTML: icon("file-text") }));
-    row.append(b);
-    if (t.dirty) row.append(el("span", "dirty-dot", "•"));
-    row.append(button(`Close ${t.path}`, () => closeTab(t), "tab-close", "x"));
+    if (t.dirty) row.setAttribute("aria-label", `${t.path}, unsaved changes`);
+    const close = button(
+      `Close ${t.path}`,
+      () => closeTab(t),
+      "tab-close",
+      "x",
+    );
+    close.append(el("span", "dirty-dot"));
+    row.append(b, close);
     host.append(row);
   }
   refreshIcons();
@@ -693,17 +708,12 @@ function renderEditor() {
   host.replaceChildren();
   $("#formatbar").replaceChildren();
   $("#conflict").replaceChildren();
-  $("#breadcrumb").textContent = active
-    ? `data  /  ${active.path.replaceAll("/", "  /  ")}`
-    : "Your personal workspace";
-  document
-    .querySelectorAll("[data-mode]")
-    .forEach((b) =>
-      b.classList.toggle(
-        "active",
-        (b as HTMLElement).dataset.mode === active?.mode,
-      ),
-    );
+  document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
+    const current = b.dataset.mode === active?.mode;
+    b.classList.toggle("active", current);
+    b.setAttribute("aria-pressed", String(current));
+    b.disabled = !active;
+  });
   if (!active) {
     host.innerHTML = `<div class="empty-state">${icon("book-open")}<h1>A place for your thoughts.</h1><p>Open a note from the Explorer, or start something new.</p><div class="empty-shortcut"><span>New note</span><kbd>Ctrl N</kbd></div><div class="empty-shortcut"><span>Find a thought</span><kbd>Ctrl Shift F</kbd></div></div>`;
     status();
@@ -872,6 +882,7 @@ async function save() {
     renderTabs();
     status();
     if (active === tab) $("#conflict").replaceChildren();
+    if (panel === "git") void refreshGit();
   } catch (e) {
     if (String(e).includes("CONFLICT")) {
       tab.conflict = true;
@@ -929,7 +940,6 @@ function toggleTheme() {
   theme = theme === "dark" ? "light" : "dark";
   applyTheme();
   renderEditor();
-  if (panel === "settings") renderPanel();
 }
 function applyTheme() {
   document.documentElement.dataset.theme = theme;
@@ -1453,7 +1463,7 @@ async function setupDialog(force = false) {
   if (setup.configured && !force) return;
   const r = await dialog(
     setup.repository ? "Data repository found" : "Version your notes with Git",
-    "Create an independent Git repository inside data. An optional remote is stored as origin. No commits, downloads, or pushes happen automatically.",
+    "Use an independent Git repository for your notes. Add an optional origin remote to push from Source Control.",
     [
       {
         key: "remote",
@@ -1469,7 +1479,7 @@ async function setupDialog(force = false) {
     if (
       await confirm(
         "Continue without Git?",
-        "You can configure a repository later from Settings.",
+        "You can configure a repository later from Source Control or Settings.",
         "Continue locally",
       )
     )
@@ -1477,12 +1487,159 @@ async function setupDialog(force = false) {
     else return setupDialog();
   }
   updateGit();
-  if (panel === "settings") renderPanel();
+  if (panel === "settings" || panel === "git") renderPanel();
+  if (panel === "git") void refreshGit();
 }
 function updateGit() {
-  $("#git-status").innerHTML =
-    icon("git-branch") + (setup?.repository ? "data · Git" : "local");
+  $("#git-status").innerHTML = icon("git-branch");
+  $("#git-status").append(
+    setup?.repository ? (gitStatus?.branch ?? "data · Git") : "local",
+  );
   refreshIcons();
+}
+function renderGitPanel(host: HTMLElement, actions: HTMLElement) {
+  const configure = () => setupDialog(true);
+  if (!setup?.repository) {
+    host.append(
+      el("p", "panel-help", "Set up Git to commit and push your notes."),
+      button("Configure Git repository", configure, "wide primary"),
+    );
+    return;
+  }
+  actions.append(
+    button("Refresh Git status", refreshGit, "icon-button", "refresh-cw"),
+    button("Git settings", configure, "icon-button", "settings"),
+  );
+  const form = el("form", "git-form");
+  const message = el("input");
+  message.id = "commit-message";
+  message.setAttribute("aria-label", "Commit message");
+  message.placeholder = "Commit message";
+  message.autocomplete = "off";
+  message.value = gitMessage;
+  message.oninput = () => {
+    gitMessage = message.value;
+    updateGitButtons();
+  };
+  const controls = el("div", "git-controls");
+  const commit = el("button", "primary", "Commit");
+  commit.id = "git-commit";
+  commit.type = "submit";
+  commit.prepend(
+    Object.assign(el("span", "git-icon"), { innerHTML: icon("check") }),
+  );
+  const push = button("Push", () => runGitAction(false), "secondary");
+  push.id = "git-push";
+  push.type = "button";
+  push.prepend(
+    Object.assign(el("span", "git-icon"), { innerHTML: icon("arrow-up") }),
+  );
+  controls.append(commit, push);
+  form.append(message, controls);
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    if (!commit.disabled) void runGitAction(true);
+  };
+  const changes = el("div");
+  changes.id = "git-changes";
+  host.append(form, changes);
+  renderGitChanges();
+}
+function updateGitButtons() {
+  const commit = document.querySelector<HTMLButtonElement>("#git-commit");
+  const push = document.querySelector<HTMLButtonElement>("#git-push");
+  if (!commit || !push) return;
+  commit.disabled = gitBusy || !gitMessage.trim() || !gitStatus?.changes.length;
+  push.disabled = gitBusy || !gitStatus?.can_push;
+  push.title = setup?.remote
+    ? gitStatus?.can_push
+      ? "Push to origin"
+      : "Create a commit on a branch to push"
+    : "Set an origin remote in Git settings";
+}
+function renderGitChanges() {
+  const host = document.querySelector("#git-changes");
+  if (!host) return;
+  updateGitButtons();
+  host.replaceChildren();
+  if (gitBusy || gitError || !gitStatus?.changes.length) {
+    host.append(
+      el(
+        "p",
+        "panel-help",
+        gitBusy
+          ? "Working…"
+          : gitError ||
+              (gitStatus ? "No saved changes." : "Loading Git status…"),
+      ),
+    );
+    return;
+  }
+  const staged = gitStatus.changes.some(
+    ({ index }) => index !== " " && index !== "?",
+  );
+  host.append(
+    el(
+      "p",
+      "panel-help",
+      staged
+        ? "Commit includes staged changes."
+        : "Commit includes all saved changes.",
+    ),
+  );
+  const list = el("ul", "git-changes");
+  for (const change of gitStatus.changes) {
+    const row = el("li", "git-change");
+    const path = el("span", "git-path", change.path);
+    path.title = change.path;
+    const flags = (change.index + change.worktree).trim();
+    row.append(path, el("span", "git-flags", flags === "??" ? "U" : flags));
+    list.append(row);
+  }
+  host.append(list);
+}
+async function refreshGit() {
+  if (!setup?.repository || gitBusy) return;
+  const request = ++gitRequest;
+  try {
+    const status = await api.gitStatus();
+    if (request !== gitRequest) return;
+    gitStatus = status;
+    gitError = "";
+  } catch (error) {
+    if (request !== gitRequest) return;
+    gitStatus = undefined;
+    gitError = String(error);
+  }
+  updateGit();
+  renderGitChanges();
+}
+async function runGitAction(commit: boolean) {
+  if (gitBusy) return;
+  gitBusy = true;
+  ++gitRequest;
+  renderGitChanges();
+  try {
+    if (commit) {
+      const message = gitMessage;
+      await api.gitCommit(message.trim());
+      if (gitMessage === message) {
+        gitMessage = defaultCommitMessage;
+        const field =
+          document.querySelector<HTMLInputElement>("#commit-message");
+        if (field) field.value = gitMessage;
+      }
+      notify("Changes committed.");
+    } else {
+      await api.gitPush();
+      notify("Pushed to origin.");
+    }
+  } catch (error) {
+    fail(error);
+  } finally {
+    gitBusy = false;
+    await refreshGit();
+  }
 }
 async function externalChanges() {
   await refreshTree();
@@ -1506,6 +1663,7 @@ async function externalChanges() {
   }
   if (!vaultBusy) await refreshVault();
   status();
+  if (panel === "git") void refreshGit();
 }
 
 document
@@ -1515,37 +1673,45 @@ document
   .querySelectorAll<HTMLElement>("[data-mode]")
   .forEach((b) => (b.onclick = () => setMode(b.dataset.mode as Mode)));
 $("#theme").onclick = toggleTheme;
-$("#quick-search").onclick = () => setPanel("search");
+$("#git-status").onclick = () => setPanel("git");
 $("#vault-status").onclick = () => setPanel("vault");
-document.addEventListener("keydown", (e) => {
-  lastActivity = Date.now();
-  if (document.querySelector("dialog[open]")) return;
-  if (e.ctrlKey || e.metaKey) {
-    const k = e.key.toLowerCase();
-    if (k === "s") {
-      e.preventDefault();
-      void busy(save);
-    } else if (k === "n") {
-      e.preventDefault();
-      void busy(() => newEntry(false));
-    } else if (k === "w") {
-      e.preventDefault();
-      if (active) void busy(() => closeTab(active!));
-    } else if (e.shiftKey && k === "f") {
-      e.preventDefault();
-      setPanel("search");
-    } else if (e.shiftKey && k === "e") {
-      e.preventDefault();
-      setPanel("explorer");
-    } else if (e.shiftKey && k === "l") {
-      e.preventDefault();
-      lockVault();
-    } else if (["1", "2", "3"].includes(k)) {
-      e.preventDefault();
-      setMode((["edit", "view", "code"] as Mode[])[Number(k) - 1]);
+window.addEventListener(
+  "keydown",
+  (e) => {
+    lastActivity = Date.now();
+    if (document.querySelector("dialog[open]")) return;
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === "s" || e.code === "KeyS") {
+        e.preventDefault();
+        e.stopPropagation();
+        void busy(save);
+      } else if (k === "n") {
+        e.preventDefault();
+        void busy(() => newEntry(false));
+      } else if (k === "w") {
+        e.preventDefault();
+        if (active) void busy(() => closeTab(active!));
+      } else if (e.shiftKey && k === "f") {
+        e.preventDefault();
+        setPanel("search");
+      } else if (e.shiftKey && k === "e") {
+        e.preventDefault();
+        setPanel("explorer");
+      } else if (e.shiftKey && k === "g") {
+        e.preventDefault();
+        setPanel("git");
+      } else if (e.shiftKey && k === "l") {
+        e.preventDefault();
+        lockVault();
+      } else if (["1", "2", "3"].includes(k)) {
+        e.preventDefault();
+        setMode((["edit", "view", "code"] as Mode[])[Number(k) - 1]);
+      }
     }
-  }
-});
+  },
+  { capture: true },
+);
 document.addEventListener("pointerdown", () => (lastActivity = Date.now()));
 setInterval(() => {
   if (session && Date.now() - lastActivity > 5 * 60 * 1000) lockVault();
@@ -1610,5 +1776,6 @@ async function start() {
     await getCurrentWindow().destroy();
   });
   await setupDialog();
+  focusEditor();
 }
 void start().catch(fail);

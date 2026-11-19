@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use keivbook::{Document, Entry, Result, Setup, Store};
+use keivbook::{Document, Entry, GitStatus, Result, Setup, Store};
 use notify::Watcher;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[tauri::command]
 fn list_tree(s: State<Store>) -> Result<Vec<Entry>> {
@@ -70,8 +70,28 @@ fn setup_status(s: State<Store>) -> Result<Setup> {
     s.setup_status()
 }
 #[tauri::command]
-fn configure_git(s: State<Store>, initialize: bool, remote: Option<String>) -> Result<Setup> {
-    s.configure(initialize, remote)
+async fn configure_git(app: AppHandle, initialize: bool, remote: Option<String>) -> Result<Setup> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Store>().configure(initialize, remote))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn git_status(app: AppHandle) -> Result<GitStatus> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Store>().git_status())
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn git_commit(app: AppHandle, message: String) -> Result<()> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Store>().git_commit(&message))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn git_push(app: AppHandle) -> Result<()> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Store>().git_push())
+        .await
+        .map_err(|e| e.to_string())?
 }
 fn main() {
     let base = if cfg!(debug_assertions) {
@@ -137,7 +157,10 @@ fn main() {
             read_vault,
             write_vault,
             setup_status,
-            configure_git
+            configure_git,
+            git_status,
+            git_commit,
+            git_push
         ])
         .run(tauri::generate_context!())
         .expect("KeivBook could not start");
